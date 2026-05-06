@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(cmd.exe *)",
+      "Bash(/c/Windows/System32/cmd.exe *)",
+      "Bash(powershell.exe *)"
+    ]
+  }
+}
