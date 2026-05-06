@@ -73,8 +73,8 @@ function isMetaLine(line: string): boolean {
   if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(line)) return true;
   // "Mensagem apagada" or similar system messages
   if (/^mensagem apagada$/i.test(line)) return true;
-  // Emoji-only lines
-  if (/^[\p{Emoji}\s]+$/u.test(line) && line.length <= 5) return true;
+  // Emoji-only / very short decorative lines
+  if (line.length <= 3) return true;
   return false;
 }
 
