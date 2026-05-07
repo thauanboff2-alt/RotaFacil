@@ -125,9 +125,14 @@ async function resolveLink(link: string): Promise<ResolvedPlace | null> {
   let expandedUrl = link;
 
   // Step 1: Expand short links (with SSRF protection)
-  if (/goo\.gl/i.test(link)) {
-    expandedUrl = await expandShortUrl(link);
+  // Strip WhatsApp/app tracking params before expanding to get a cleaner redirect
+  const cleanLink = link.replace(/[?&]g_st=[^&]*/g, "").replace(/[?&]$/, "");
+  if (/goo\.gl/i.test(cleanLink)) {
+    expandedUrl = await expandShortUrl(cleanLink);
   }
+
+  // Debug log visible in Vercel Function Logs (not exposed to users)
+  console.log(`[resolve] original="${link}" expanded="${expandedUrl}"`);
 
   // Step 2: Extract data from URL
   const placeId = extractPlaceId(expandedUrl);
