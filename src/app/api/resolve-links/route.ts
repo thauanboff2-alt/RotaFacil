@@ -142,27 +142,34 @@ async function resolveLink(link: string): Promise<ResolvedPlace | null> {
 
   // Step 3: Resolve using best available data — cascade through fallbacks
 
-  // 3a. Place ID (standard ChIJ… format works; CID 0x… usually fails gracefully)
+  // 3a. Place ID (standard ChIJ… works; CID 0x… fails gracefully → continue)
   if (placeId) {
     const byId = await resolveByPlaceId(placeId, link);
     if (byId) return byId;
   }
 
-  // 3b. Coordinates (most reliable)
+  // 3b. Coordinates (most reliable, uses Geocoding API)
   if (coords) {
     return resolveByCoordinates(coords.lat, coords.lng, link, query);
   }
 
-  // 3c. Text search with short name
+  // 3c. Places text search with short name (requires Places API)
   if (query) {
     const byName = await resolveByTextSearch(query, link);
     if (byName) return byName;
   }
 
-  // 3d. Final fallback: text search with full address string
-  //     (catches cases like "SÓ BANANAS P&K - Rodovia Br 280, Corupá - SC")
+  // 3d. Places text search with full address string (requires Places API)
   if (fullQuery && fullQuery !== query) {
-    return resolveByTextSearch(fullQuery, link);
+    const byFull = await resolveByTextSearch(fullQuery, link);
+    if (byFull) return byFull;
+  }
+
+  // 3e. Geocoding API with the address from URL path — works even without Places API
+  //     e.g. "José Carlos Packer - Produtor Rural, Corupá - SC, 89278-000"
+  //     → geocodes the city/address portion and returns approximate location
+  if (fullQuery) {
+    return resolveByAddressGeocoding(fullQuery, query || fullQuery, link);
   }
 
   return null;
@@ -416,6 +423,46 @@ async function resolveByTextSearch(
       id: crypto.randomUUID(),
       originalLink,
       name: result.name || query,
+      address: result.formatted_address || "",
+      coordinates: {
+        lat: result.geometry.location.lat,
+        lng: result.geometry.location.lng,
+      },
+      placeId: result.place_id,
+      status: "resolved",
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Forward geocoding fallback using the Geocoding API.
+ * Used when the Places API is unavailable or returns no results.
+ * Geocodes the address string from the URL path to get coordinates.
+ * Uses `displayName` as the place label (e.g. the person/business name).
+ */
+async function resolveByAddressGeocoding(
+  address: string,
+  displayName: string,
+  originalLink: string
+): Promise<ResolvedPlace | null> {
+  const url =
+    `https://maps.googleapis.com/maps/api/geocode/json` +
+    `?address=${encodeURIComponent(address)}` +
+    `&key=${API_KEY}`;
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  const data = await res.json();
+
+  console.log(`[geocodeAddress] status=${data.status} address="${address}"`);
+
+  if (data.status === "OK" && data.results?.[0]) {
+    const result = data.results[0];
+    return {
+      id: crypto.randomUUID(),
+      originalLink,
+      name: displayName || result.formatted_address?.split(",")[0] || address,
       address: result.formatted_address || "",
       coordinates: {
         lat: result.geometry.location.lat,
