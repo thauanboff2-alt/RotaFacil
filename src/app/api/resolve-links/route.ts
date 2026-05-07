@@ -141,7 +141,10 @@ async function resolveLink(link: string): Promise<ResolvedPlace | null> {
 
   // Step 3: Resolve using best available data
   if (placeId) {
-    return resolveByPlaceId(placeId, link);
+    // CID hex format (0x...:0x...) may not be accepted by Places API — fall through on failure
+    const byId = await resolveByPlaceId(placeId, link);
+    if (byId) return byId;
+    // If CID lookup failed, continue to coords / text search below
   }
 
   if (coords) {
@@ -211,11 +214,18 @@ async function expandShortUrl(url: string): Promise<string> {
 }
 
 function extractPlaceId(url: string): string | null {
+  // Standard place_id= parameter (ChIJ... format)
   const match = url.match(/place_id[=:]([A-Za-z0-9_-]+)/);
   if (match) return match[1];
 
+  // ftid= parameter (older format)
   const ftidMatch = url.match(/ftid=(0x[0-9a-f]+:0x[0-9a-f]+)/i);
   if (ftidMatch) return ftidMatch[1];
+
+  // CID embedded in data= param: !1s0x<hex>:0x<hex>
+  // e.g. /data=!4m2!3m1!1s0x94de8fbb2cdf0287:0xbbe0a865ebfd2ade
+  const cidMatch = url.match(/!1s(0x[0-9a-f]+:0x[0-9a-f]+)/i);
+  if (cidMatch) return cidMatch[1];
 
   return null;
 }
@@ -256,7 +266,14 @@ function isValidCoords(lat: number, lng: number): boolean {
 function extractQuery(url: string): string | null {
   const placeMatch = url.match(/\/place\/([^/@?]+)/);
   if (placeMatch) {
-    return decodeURIComponent(placeMatch[1]).replace(/\+/g, " ").trim();
+    const decoded = decodeURIComponent(placeMatch[1]).replace(/\+/g, " ").trim();
+    // When the path contains "Name - Street Address, City..." use only the first part
+    // so the Places text search gets a clean business name instead of a full address string
+    if (decoded.length > 50 && decoded.includes(" - ")) {
+      const firstPart = decoded.split(/\s+-\s+/)[0].trim();
+      if (firstPart.length >= 4) return firstPart;
+    }
+    return decoded;
   }
 
   const qMatch = url.match(/[?&]q=([^&]+)/);
