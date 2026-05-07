@@ -46,16 +46,29 @@ export function isShortLink(url: string): boolean {
 // ─────────────────────────────────────────────
 
 /**
- * Strip WhatsApp timestamps (e.g. "23:02 ✓", "23:02 ✓✓", "10:30") from end of line.
- * Also strips leading date separators like "10/05/2025, 23:00".
+ * Strip WhatsApp noise from a line.
+ *
+ * Handles multiple WhatsApp export formats:
+ *
+ * Mobile (Android/iOS):
+ *   "23:02 ✓"  →  trailing timestamp at end of line
+ *   "10/05/2025, 23:00 - Name: text"
+ *
+ * Web/Desktop (exported chat):
+ *   "[22:41, 16/03/2026] Thauan Boff: text"
+ *   "[22:41 - 16/03/2026] Thauan Boff: text"
  */
 function cleanLine(raw: string): string {
   return raw
     .trim()
-    // Remove trailing WhatsApp timestamp + read-receipt ticks
-    .replace(/\s+\d{1,2}:\d{2}\s*[\u2713\u2714✓✓]*\s*$/, "")
-    // Remove full date+time prefix like "10/05/2025, 23:00 - Name:"
-    .replace(/^\d{1,2}\/\d{1,2}\/\d{4},?\s*\d{1,2}:\d{2}\s*[-–]?\s*/, "")
+    // WhatsApp Web/Desktop: "[HH:MM, DD/MM/YYYY] Sender: " prefix
+    .replace(/^\[\d{1,2}:\d{2}[\s,\-]+\d{1,2}\/\d{1,2}\/\d{2,4}\]\s*[^:]+:\s*/, "")
+    // WhatsApp mobile export: "DD/MM/YYYY, HH:MM - Sender: " prefix
+    .replace(/^\d{1,2}\/\d{1,2}\/\d{2,4},?\s*\d{1,2}:\d{2}\s*[-–]\s*[^:]+:\s*/, "")
+    // Remaining bare date prefix: "DD/MM/YYYY, HH:MM"
+    .replace(/^\d{1,2}\/\d{1,2}\/\d{2,4},?\s*\d{1,2}:\d{2}\s*/, "")
+    // Trailing timestamp + read-receipt ticks (mobile): " 23:02 ✓✓"
+    .replace(/\s+\d{1,2}:\d{2}\s*[\u2713\u2714✓]*\s*$/, "")
     .trim();
 }
 

@@ -216,47 +216,32 @@ function extractPlaceId(url: string): string | null {
 }
 
 function extractCoordinates(url: string): { lat: number; lng: number } | null {
-  // @lat,lng,zoom — share/pin format (most common)
-  const atMatch = url.match(/@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);
-  if (atMatch) {
-    const lat = parseFloat(atMatch[1]);
-    const lng = parseFloat(atMatch[2]);
-    if (isValidCoords(lat, lng)) return { lat, lng };
-  }
+  const try2 = (m: RegExpMatchArray | null) => {
+    if (!m) return null;
+    const lat = parseFloat(m[1]);
+    const lng = parseFloat(m[2]);
+    return isValidCoords(lat, lng) ? { lat, lng } : null;
+  };
 
-  // ll=lat,lng
-  const llMatch = url.match(/ll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);
-  if (llMatch) {
-    const lat = parseFloat(llMatch[1]);
-    const lng = parseFloat(llMatch[2]);
-    if (isValidCoords(lat, lng)) return { lat, lng };
-  }
-
-  // q=lat,lng (only if both parts look like coordinates)
-  const qMatch = url.match(/[?&]q=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);
-  if (qMatch) {
-    const lat = parseFloat(qMatch[1]);
-    const lng = parseFloat(qMatch[2]);
-    if (isValidCoords(lat, lng)) return { lat, lng };
-  }
-
-  // center=lat,lng
-  const centerMatch = url.match(/center=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);
-  if (centerMatch) {
-    const lat = parseFloat(centerMatch[1]);
-    const lng = parseFloat(centerMatch[2]);
-    if (isValidCoords(lat, lng)) return { lat, lng };
-  }
-
-  // /lat,lng/ in path (require ≥4 decimal places for precision)
-  const dirMatch = url.match(/\/(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})/);
-  if (dirMatch) {
-    const lat = parseFloat(dirMatch[1]);
-    const lng = parseFloat(dirMatch[2]);
-    if (isValidCoords(lat, lng)) return { lat, lng };
-  }
-
-  return null;
+  // @lat,lng,zoom — most common share/pin format
+  return (
+    try2(url.match(/@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/)) ||
+    // ll=lat,lng
+    try2(url.match(/[?&]ll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/)) ||
+    // q=lat,lng
+    try2(url.match(/[?&]q=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/)) ||
+    // center=lat,lng
+    try2(url.match(/[?&]center=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/)) ||
+    // sll=lat,lng (older Google Maps)
+    try2(url.match(/[?&]sll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/)) ||
+    // cbll=lat,lng (Street View)
+    try2(url.match(/[?&]cbll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/)) ||
+    // !3d<lat>!4d<lng> inside data= param (Google Maps embed / share)
+    try2(url.match(/!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/)) ||
+    // /lat,lng/ in path (≥4 decimal places)
+    try2(url.match(/\/(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})/)) ||
+    null
+  );
 }
 
 function isValidCoords(lat: number, lng: number): boolean {
