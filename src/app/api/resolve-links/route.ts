@@ -137,22 +137,32 @@ async function resolveLink(link: string): Promise<ResolvedPlace | null> {
   // Step 2: Extract data from URL
   const placeId = extractPlaceId(expandedUrl);
   const coords = extractCoordinates(expandedUrl);
-  const query = extractQuery(expandedUrl);
+  const query = extractQuery(expandedUrl);         // short name (business name only)
+  const fullQuery = extractFullQuery(expandedUrl); // full decoded path (name + address)
 
-  // Step 3: Resolve using best available data
+  // Step 3: Resolve using best available data — cascade through fallbacks
+
+  // 3a. Place ID (standard ChIJ… format works; CID 0x… usually fails gracefully)
   if (placeId) {
-    // CID hex format (0x...:0x...) may not be accepted by Places API — fall through on failure
     const byId = await resolveByPlaceId(placeId, link);
     if (byId) return byId;
-    // If CID lookup failed, continue to coords / text search below
   }
 
+  // 3b. Coordinates (most reliable)
   if (coords) {
     return resolveByCoordinates(coords.lat, coords.lng, link, query);
   }
 
+  // 3c. Text search with short name
   if (query) {
-    return resolveByTextSearch(query, link);
+    const byName = await resolveByTextSearch(query, link);
+    if (byName) return byName;
+  }
+
+  // 3d. Final fallback: text search with full address string
+  //     (catches cases like "SÓ BANANAS P&K - Rodovia Br 280, Corupá - SC")
+  if (fullQuery && fullQuery !== query) {
+    return resolveByTextSearch(fullQuery, link);
   }
 
   return null;
@@ -288,6 +298,17 @@ function extractQuery(url: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Returns the full decoded place name + address from the URL path,
+ * without truncation. Used as a last-resort text search query.
+ */
+function extractFullQuery(url: string): string | null {
+  const placeMatch = url.match(/\/place\/([^/@?]+)/);
+  if (!placeMatch) return null;
+  const decoded = decodeURIComponent(placeMatch[1]).replace(/\+/g, " ").trim();
+  return decoded || null;
 }
 
 // ─────────────────────────────────────────────
