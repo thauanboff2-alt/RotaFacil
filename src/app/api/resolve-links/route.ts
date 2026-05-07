@@ -328,6 +328,8 @@ async function resolveByPlaceId(
   const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   const data = await res.json();
 
+  console.log(`[placeId] status=${data.status} placeId=${placeId}`);
+
   if (data.status === "OK" && data.result) {
     return {
       id: crypto.randomUUID(),
@@ -405,6 +407,8 @@ async function resolveByTextSearch(
 
   const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   const data = await res.json();
+
+  console.log(`[textSearch] status=${data.status} query="${query}"`);
 
   if (data.status === "OK" && data.results?.[0]) {
     const result = data.results[0];
