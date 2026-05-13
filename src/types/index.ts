@@ -53,6 +53,7 @@ export interface OptimizeRouteResponse {
   totalDistanceMeters: number;
   legs: RouteLeg[];
   googleMapsUrl: string;
+  googleMapsUrls: string[];
 }
 
 export interface RouteLeg {

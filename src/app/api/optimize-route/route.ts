@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { optimizeRouteRequestSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import {
-  buildGoogleMapsUrl,
+  buildGoogleMapsUrls,
   nearestNeighborOrder,
   deduplicatePlaces,
   haversineDistance,
@@ -118,13 +118,14 @@ async function optimizeWithDirectionsApi(
   try {
     // Single destination — no optimization needed
     if (places.length === 1) {
-      const urlResult = buildGoogleMapsUrl(origin, places);
+      const { urls } = buildGoogleMapsUrls(origin, places);
       return {
         orderedStops: places,
         totalDurationSeconds: 0,
         totalDistanceMeters: 0,
         legs: [],
-        googleMapsUrl: urlResult.url,
+        googleMapsUrl: urls[0] ?? "",
+        googleMapsUrls: urls,
       };
     }
 
@@ -186,14 +187,15 @@ async function optimizeWithDirectionsApi(
       totalDistance += leg.distance.value;
     }
 
-    const urlResult = buildGoogleMapsUrl(origin, orderedStops);
+    const { urls } = buildGoogleMapsUrls(origin, orderedStops);
 
     return {
       orderedStops,
       totalDurationSeconds: totalDuration,
       totalDistanceMeters: totalDistance,
       legs,
-      googleMapsUrl: urlResult.url,
+      googleMapsUrl: urls[0] ?? "",
+      googleMapsUrls: urls,
     };
   } catch {
     return null;
@@ -227,13 +229,14 @@ function fallbackOptimization(
 ): OptimizeRouteResponse {
   const order = nearestNeighborOrder(origin, places);
   const orderedStops = order.map((i) => places[i]);
-  const urlResult = buildGoogleMapsUrl(origin, orderedStops);
+  const { urls } = buildGoogleMapsUrls(origin, orderedStops);
 
   return {
     orderedStops,
     totalDurationSeconds: 0,
     totalDistanceMeters: 0,
     legs: [],
-    googleMapsUrl: urlResult.url,
+    googleMapsUrl: urls[0] ?? "",
+    googleMapsUrls: urls,
   };
 }

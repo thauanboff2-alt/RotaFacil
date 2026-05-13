@@ -11,7 +11,9 @@
  *     &travelmode=driving
  *
  * Limitations:
- * - Google Maps URL supports up to ~23 waypoints in practice (URL length limit ~2048 chars)
+ * - Google Maps consumer app supports up to 10 stops per route link
+ * - When there are more than 10 stops, multiple links are generated
+ * - Each subsequent link starts from the last stop of the previous link
  * - The `optimize:true` waypoint flag is NOT supported in the URL scheme (only in Directions API)
  * - place_id can be used with `destination_place_id` param but waypoints only support coords/addresses
  */
@@ -19,33 +21,22 @@
 import { Coordinates, ResolvedPlace } from "@/types";
 
 const MAPS_BASE = "https://www.google.com/maps/dir/";
-const MAX_WAYPOINTS_IN_URL = 23;
+export const MAX_STOPS_PER_LINK = 10;
 
-export interface BuildUrlResult {
-  url: string;
-  waypointCount: number;
-  truncated: boolean;
-  warning?: string;
+export interface BuildUrlsResult {
+  urls: string[];
+  chunks: number;
 }
 
-export function buildGoogleMapsUrl(
-  origin: Coordinates,
-  orderedStops: ResolvedPlace[]
-): BuildUrlResult {
-  if (orderedStops.length === 0) {
-    return {
-      url: `${MAPS_BASE}?api=1`,
-      waypointCount: 0,
-      truncated: false,
-      warning: "Nenhuma parada fornecida.",
-    };
-  }
+/**
+ * Build a single Google Maps URL for a given origin and list of stops.
+ * Assumes stops.length <= MAX_STOPS_PER_LINK.
+ */
+function buildSingleUrl(origin: Coordinates, stops: ResolvedPlace[]): string {
+  if (stops.length === 0) return `${MAPS_BASE}?api=1`;
 
-  const destination = orderedStops[orderedStops.length - 1];
-  const waypoints = orderedStops.slice(0, -1);
-
-  const truncated = waypoints.length > MAX_WAYPOINTS_IN_URL;
-  const effectiveWaypoints = waypoints.slice(0, MAX_WAYPOINTS_IN_URL);
+  const destination = stops[stops.length - 1];
+  const waypoints = stops.slice(0, -1);
 
   const params = new URLSearchParams();
   params.set("api", "1");
@@ -59,21 +50,69 @@ export function buildGoogleMapsUrl(
   }
   params.set("travelmode", "driving");
 
-  if (effectiveWaypoints.length > 0) {
-    const waypointStr = effectiveWaypoints
+  if (waypoints.length > 0) {
+    const waypointStr = waypoints
       .map((p) => `${p.coordinates.lat},${p.coordinates.lng}`)
       .join("|");
     params.set("waypoints", waypointStr);
   }
 
-  const url = `${MAPS_BASE}?${params.toString()}`;
+  return `${MAPS_BASE}?${params.toString()}`;
+}
 
+/**
+ * Build one or more Google Maps URLs for the full ordered route.
+ *
+ * Splits stops into chunks of MAX_STOPS_PER_LINK. Each chunk after the first
+ * uses the last stop of the previous chunk as its origin, ensuring continuity.
+ *
+ * Example (22 stops → 3 links):
+ *   Link 1: origin=userLoc,  stops 1-10
+ *   Link 2: origin=stop 10,  stops 11-20
+ *   Link 3: origin=stop 20,  stops 21-22
+ */
+export function buildGoogleMapsUrls(
+  origin: Coordinates,
+  orderedStops: ResolvedPlace[]
+): BuildUrlsResult {
+  if (orderedStops.length === 0) return { urls: [], chunks: 0 };
+
+  const urls: string[] = [];
+
+  for (let i = 0; i < orderedStops.length; i += MAX_STOPS_PER_LINK) {
+    const chunk = orderedStops.slice(i, i + MAX_STOPS_PER_LINK);
+    const chunkOrigin =
+      i === 0 ? origin : orderedStops[i - 1].coordinates;
+    urls.push(buildSingleUrl(chunkOrigin, chunk));
+  }
+
+  return { urls, chunks: urls.length };
+}
+
+/**
+ * @deprecated Use buildGoogleMapsUrls instead.
+ * Kept for any legacy callers; returns only the first URL.
+ */
+export interface BuildUrlResult {
+  url: string;
+  waypointCount: number;
+  truncated: boolean;
+  warning?: string;
+}
+
+export function buildGoogleMapsUrl(
+  origin: Coordinates,
+  orderedStops: ResolvedPlace[]
+): BuildUrlResult {
+  const { urls } = buildGoogleMapsUrls(origin, orderedStops);
+  const url = urls[0] ?? `${MAPS_BASE}?api=1`;
+  const truncated = orderedStops.length > MAX_STOPS_PER_LINK;
   return {
     url,
-    waypointCount: effectiveWaypoints.length,
+    waypointCount: Math.min(orderedStops.length - 1, MAX_STOPS_PER_LINK - 1),
     truncated,
     warning: truncated
-      ? `O Google Maps suporta até ${MAX_WAYPOINTS_IN_URL} paradas intermediárias. ${waypoints.length - MAX_WAYPOINTS_IN_URL} paradas foram removidas.`
+      ? `Rota dividida em ${urls.length} links (${MAX_STOPS_PER_LINK} paradas por link).`
       : undefined,
   };
 }

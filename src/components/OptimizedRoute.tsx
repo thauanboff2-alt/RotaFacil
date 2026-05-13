@@ -3,35 +3,47 @@
 import { useState } from "react";
 import { OptimizeRouteResponse, Coordinates } from "@/types";
 
+const CHUNK_SIZE = 10;
+
 interface OptimizedRouteProps {
   route: OptimizeRouteResponse;
   origin: Coordinates;
 }
 
 export default function OptimizedRoute({ route, origin }: OptimizedRouteProps) {
-  const [copied, setCopied] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
-  const openRoute = () => {
-    window.open(route.googleMapsUrl, "_blank", "noopener");
+  const urls = route.googleMapsUrls ?? [route.googleMapsUrl];
+  const isMultiLink = urls.length > 1;
+
+  const openRoute = (url: string) => {
+    window.open(url, "_blank", "noopener");
   };
 
-  const copyLink = async () => {
+  const copyLink = async (url: string, index: number) => {
     try {
-      await navigator.clipboard.writeText(route.googleMapsUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(url);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
     } catch {
-      // Fallback
       const input = document.createElement("input");
-      input.value = route.googleMapsUrl;
+      input.value = url;
       document.body.appendChild(input);
       input.select();
       document.execCommand("copy");
       document.body.removeChild(input);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
     }
   };
+
+  // Build per-chunk ranges for labeling buttons
+  const chunks = urls.map((url, i) => ({
+    url,
+    index: i,
+    startStop: i * CHUNK_SIZE + 1,
+    endStop: Math.min((i + 1) * CHUNK_SIZE, route.orderedStops.length),
+  }));
 
   const totalMinutes = Math.round(route.totalDurationSeconds / 60);
   const hours = Math.floor(totalMinutes / 60);
@@ -76,41 +88,54 @@ export default function OptimizedRoute({ route, origin }: OptimizedRouteProps) {
           </div>
         )}
 
-        {/* CTA button */}
-        <button
-          onClick={openRoute}
-          className="w-full py-4 rounded-xl font-bold text-base tracking-wide bg-gradient-to-r from-accent to-accent-dark text-surface-950 hover:shadow-xl hover:shadow-accent/25 transition-all duration-300 flex items-center justify-center gap-2"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-            <polyline points="15 3 21 3 21 9" />
-            <line x1="10" y1="14" x2="21" y2="3" />
-          </svg>
-          Abrir rota no Google Maps
-        </button>
+        {/* CTA buttons — one per link chunk */}
+        {isMultiLink && (
+          <p className="text-xs text-surface-300/50 text-center">
+            Rota dividida em <span className="text-accent font-medium">{urls.length} links</span> (limite de {CHUNK_SIZE} paradas por link)
+          </p>
+        )}
 
-        {/* Secondary: copy link */}
-        <button
-          onClick={copyLink}
-          className="w-full py-2.5 rounded-lg text-sm text-surface-300 hover:text-accent border border-surface-800/60 hover:border-accent/30 transition-all flex items-center justify-center gap-2"
-        >
-          {copied ? (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a9a6e" strokeWidth="2.5">
-                <path d="M20 6L9 17l-5-5" />
-              </svg>
-              Link copiado!
-            </>
-          ) : (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-              </svg>
-              Copiar link da rota
-            </>
-          )}
-        </button>
+        <div className="space-y-2">
+          {chunks.map(({ url, index, startStop, endStop }) => (
+            <div key={index} className="space-y-1">
+              <button
+                onClick={() => openRoute(url)}
+                className="w-full py-3.5 rounded-xl font-bold text-sm tracking-wide bg-gradient-to-r from-accent to-accent-dark text-surface-950 hover:shadow-xl hover:shadow-accent/25 transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                {isMultiLink
+                  ? `Abrir Rota ${index + 1} (paradas ${startStop}–${endStop})`
+                  : "Abrir rota no Google Maps"}
+              </button>
+
+              <button
+                onClick={() => copyLink(url, index)}
+                className="w-full py-2 rounded-lg text-xs text-surface-300 hover:text-accent border border-surface-800/60 hover:border-accent/30 transition-all flex items-center justify-center gap-2"
+              >
+                {copiedIndex === index ? (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5a9a6e" strokeWidth="2.5">
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                    Link copiado!
+                  </>
+                ) : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                    </svg>
+                    {isMultiLink ? `Copiar link da Rota ${index + 1}` : "Copiar link da rota"}
+                  </>
+                )}
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Route steps */}
@@ -139,9 +164,23 @@ export default function OptimizedRoute({ route, origin }: OptimizedRouteProps) {
         {route.orderedStops.map((stop, index) => {
           const leg = route.legs[index];
           const isLast = index === route.orderedStops.length - 1;
+          // Show a link-boundary divider before the first stop of each subsequent chunk
+          const isChunkStart = isMultiLink && index > 0 && index % CHUNK_SIZE === 0;
+          const chunkNumber = Math.floor(index / CHUNK_SIZE) + 1;
 
           return (
             <div key={stop.id}>
+              {/* Chunk boundary divider */}
+              {isChunkStart && (
+                <div className="my-3 flex items-center gap-2">
+                  <div className="flex-1 h-px bg-accent/20" />
+                  <span className="text-[10px] font-medium text-accent/60 uppercase tracking-widest px-2">
+                    Link {chunkNumber}
+                  </span>
+                  <div className="flex-1 h-px bg-accent/20" />
+                </div>
+              )}
+
               {/* Leg info */}
               {leg && (
                 <div className="ml-4 pl-7 py-1.5 flex items-center gap-2 text-[10px] text-surface-300/40">
@@ -211,13 +250,22 @@ export default function OptimizedRoute({ route, origin }: OptimizedRouteProps) {
       </div>
 
       {/* Link preview */}
-      <div className="bg-surface-900/40 border border-surface-800/40 rounded-xl p-3 space-y-2">
+      <div className="bg-surface-900/40 border border-surface-800/40 rounded-xl p-3 space-y-3">
         <p className="text-[10px] uppercase tracking-widest text-surface-300/40 font-medium">
-          URL da rota
+          {isMultiLink ? `URLs das rotas (${urls.length} links)` : "URL da rota"}
         </p>
-        <p className="text-xs font-mono text-surface-300/60 break-all leading-relaxed select-all">
-          {route.googleMapsUrl}
-        </p>
+        {chunks.map(({ url, index, startStop, endStop }) => (
+          <div key={index} className="space-y-1">
+            {isMultiLink && (
+              <p className="text-[10px] text-surface-300/40 font-medium">
+                Rota {index + 1} — paradas {startStop}–{endStop}
+              </p>
+            )}
+            <p className="text-xs font-mono text-surface-300/60 break-all leading-relaxed select-all">
+              {url}
+            </p>
+          </div>
+        ))}
       </div>
 
       {/* Route list: name + empreendimento */}
