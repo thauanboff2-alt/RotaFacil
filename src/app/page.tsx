@@ -245,31 +245,33 @@ export default function Home() {
   return (
     <main className="hero-gradient min-h-screen">
       {/* Header */}
-      <header className="border-b border-surface-800/60 backdrop-blur-sm sticky top-0 z-50 bg-surface-950/80">
-        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-accent to-accent-dark flex items-center justify-center">
+      <header className="border-b border-accent/10 backdrop-blur-sm sticky top-0 z-50 bg-surface-950/90">
+        <div className="max-w-3xl mx-auto px-4 py-3.5 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-accent-dark flex items-center justify-center shadow-sm shadow-accent/30">
               <svg
-                width="18"
-                height="18"
+                width="16"
+                height="16"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="currentColor"
+                stroke="white"
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className="text-surface-950"
               >
                 <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
                 <circle cx="12" cy="9" r="2.5" />
               </svg>
             </div>
-            <h1 className="font-display text-xl tracking-tight">RotaFácil</h1>
+            <div>
+              <h1 className="font-display text-base tracking-tight leading-none">RotaFácil</h1>
+              <p className="text-[10px] text-accent/60 tracking-wide leading-none mt-0.5">Fiscais &amp; Peritos</p>
+            </div>
           </div>
           {state.step !== "input" && (
             <button
               onClick={reset}
-              className="text-sm text-surface-300 hover:text-accent transition-colors"
+              className="text-xs text-surface-300/60 hover:text-accent transition-colors border border-surface-800/40 hover:border-accent/30 px-3 py-1.5 rounded-lg"
             >
               Nova rota
             </button>
@@ -278,16 +280,60 @@ export default function Home() {
       </header>
 
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-8">
-        {/* Hero */}
-        <section className="text-center space-y-3 animate-fade-in">
-          <h2 className="font-display text-3xl sm:text-4xl tracking-tight">
-            Otimize sua rota
-            <span className="text-accent"> em segundos</span>
-          </h2>
-          <p className="text-surface-300 text-base max-w-lg mx-auto leading-relaxed">
-            Cole a conversa do WhatsApp. O sistema detecta automaticamente os links,
-            nomes e empreendimentos.
-          </p>
+        {/* Hero / Entrada */}
+        <section className="animate-fade-in">
+          {/* Destaque institucional */}
+          <div className="relative overflow-hidden rounded-2xl border border-accent/20 bg-gradient-to-br from-surface-900 via-surface-900/95 to-surface-800/80 px-6 py-8 mb-6 text-center">
+            {/* Decoração de fundo */}
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-accent/5" />
+              <div className="absolute -bottom-10 -left-10 w-36 h-36 rounded-full bg-lime/5" />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-px bg-gradient-to-r from-transparent via-accent/10 to-transparent" />
+            </div>
+
+            {/* Ícone */}
+            <div className="relative flex justify-center mb-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-accent to-accent-dark flex items-center justify-center shadow-lg shadow-accent/20">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+                  <circle cx="12" cy="9" r="2.5" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Frase de destaque */}
+            <div className="relative space-y-2">
+              <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent/70">
+                RotaFácil
+              </p>
+              <h2 className="font-display text-2xl sm:text-3xl tracking-tight text-white leading-snug">
+                Sua rota ainda mais{" "}
+                <span className="text-accent">fácil</span>
+              </h2>
+              <p className="text-sm font-medium text-surface-300/80 max-w-xs mx-auto leading-relaxed pt-1">
+                Aplicativo destinado a{" "}
+                <span className="text-lime font-semibold">Fiscais</span>
+                {" "}e{" "}
+                <span className="text-lime font-semibold">Peritos</span>
+              </p>
+            </div>
+
+            {/* Linha decorativa */}
+            <div className="relative mt-5 flex items-center gap-3 justify-center">
+              <div className="h-px w-12 bg-gradient-to-r from-transparent to-accent/30" />
+              <div className="flex gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-accent/50" />
+                <div className="w-1.5 h-1.5 rounded-full bg-lime/50" />
+                <div className="w-1.5 h-1.5 rounded-full bg-info/50" />
+              </div>
+              <div className="h-px w-12 bg-gradient-to-l from-transparent to-accent/30" />
+            </div>
+
+            {/* Sub-instrução */}
+            <p className="relative mt-4 text-xs text-surface-300/50 max-w-sm mx-auto leading-relaxed">
+              Cole os links do Google Maps da conversa do WhatsApp. O sistema detecta automaticamente locais, nomes e empreendimentos.
+            </p>
+          </div>
         </section>
 
         {/* Step indicator */}
