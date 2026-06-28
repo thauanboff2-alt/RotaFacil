@@ -14,6 +14,7 @@ export const resolveLinksRequestSchema = z.object({
 
 export const optimizeRouteRequestSchema = z.object({
   origin: coordinatesSchema,
+  returnToOrigin: z.boolean().optional(),
   destinations: z
     .array(
       z.object({

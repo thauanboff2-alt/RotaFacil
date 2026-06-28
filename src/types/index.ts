@@ -45,6 +45,7 @@ export interface ResolveLinksResponse {
 export interface OptimizeRouteRequest {
   origin: Coordinates;
   destinations: ResolvedPlace[];
+  returnToOrigin?: boolean;
 }
 
 export interface OptimizeRouteResponse {
@@ -84,5 +85,6 @@ export interface AppState {
   resolvedPlaces: ResolvedPlace[];
   failedLinks: UnresolvedLink[];
   optimizedRoute: OptimizeRouteResponse | null;
+  returnToOrigin: boolean;
   error?: string;
 }

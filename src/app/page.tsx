@@ -25,6 +25,7 @@ const initialState: AppState = {
   resolvedPlaces: [],
   failedLinks: [],
   optimizedRoute: null,
+  returnToOrigin: false,
 };
 
 export default function Home() {
@@ -135,16 +136,7 @@ export default function Home() {
   }, [state.rawText]);
 
   // ── Optimize route ─────────────────────────
-  const optimizeRoute = useCallback(async () => {
-    if (!state.userLocation) {
-      setState((s) => ({ ...s, error: "Ative a localização antes de otimizar a rota." }));
-      return;
-    }
-    if (state.resolvedPlaces.length === 0) {
-      setState((s) => ({ ...s, error: "Nenhum local resolvido para otimizar." }));
-      return;
-    }
-
+  const optimizeRouteWithLocation = useCallback(async (location: Coordinates, places: ResolvedPlace[], returnToOrigin: boolean) => {
     setOptimizing(true);
     setState((s) => ({ ...s, step: "optimizing", error: undefined }));
 
@@ -153,8 +145,9 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          origin: state.userLocation,
-          destinations: state.resolvedPlaces,
+          origin: location,
+          destinations: places,
+          returnToOrigin,
         }),
       });
 
@@ -179,7 +172,47 @@ export default function Home() {
     } finally {
       setOptimizing(false);
     }
-  }, [state.userLocation, state.resolvedPlaces]);
+  }, []);
+
+  const optimizeRoute = useCallback(async () => {
+    if (!state.userLocation) {
+      setState((s) => ({ ...s, error: "Ative a localização antes de otimizar a rota." }));
+      return;
+    }
+    if (state.resolvedPlaces.length === 0) {
+      setState((s) => ({ ...s, error: "Nenhum local resolvido para otimizar." }));
+      return;
+    }
+    await optimizeRouteWithLocation(state.userLocation, state.resolvedPlaces, state.returnToOrigin);
+  }, [state.userLocation, state.resolvedPlaces, state.returnToOrigin, optimizeRouteWithLocation]);
+
+  // ── Recalculate route from new location ────
+  const recalculateRoute = useCallback(() => {
+    if (!navigator.geolocation) return;
+    setState((s) => ({ ...s, locationStatus: "loading", error: undefined }));
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const newLocation: Coordinates = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setState((s) => ({
+          ...s,
+          userLocation: newLocation,
+          locationAccuracy: pos.coords.accuracy ?? null,
+          locationStatus: "success",
+        }));
+        optimizeRouteWithLocation(newLocation, state.resolvedPlaces, state.returnToOrigin);
+      },
+      () => {
+        setState((s) => ({
+          ...s,
+          locationStatus: "error",
+          locationError: "Não foi possível atualizar a localização.",
+          step: "optimized",
+        }));
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }, [state.resolvedPlaces, state.returnToOrigin, optimizeRouteWithLocation]);
 
   // ── Remove place ───────────────────────────
   const removePlace = useCallback((id: string) => {
@@ -320,6 +353,25 @@ export default function Home() {
                 onDescriptionChange={updateDescription}
               />
 
+              {/* Return to origin toggle */}
+              <label className="flex items-center gap-3 px-4 py-3 rounded-xl border border-surface-800/60 bg-surface-900/40 cursor-pointer hover:border-accent/30 transition-colors">
+                <div className="relative flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={state.returnToOrigin}
+                    onChange={(e) => setState((s) => ({ ...s, returnToOrigin: e.target.checked }))}
+                  />
+                  <div className={`w-10 h-6 rounded-full transition-colors ${state.returnToOrigin ? "bg-accent" : "bg-surface-700"}`}>
+                    <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform ${state.returnToOrigin ? "translate-x-5" : "translate-x-1"}`} />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-surface-100">Retornar ao ponto de partida</p>
+                  <p className="text-xs text-surface-300/50 mt-0.5">A rota termina no seu local de saída</p>
+                </div>
+              </label>
+
               <button
                 onClick={optimizeRoute}
                 disabled={
@@ -350,6 +402,8 @@ export default function Home() {
           <OptimizedRoute
             route={state.optimizedRoute}
             origin={state.userLocation!}
+            returnToOrigin={state.returnToOrigin}
+            onRecalculate={recalculateRoute}
           />
         )}
 

@@ -75,9 +75,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { origin, destinations } = parsed.data as {
+    const { origin, destinations, returnToOrigin } = parsed.data as {
       origin: Coordinates;
       destinations: ResolvedPlace[];
+      returnToOrigin?: boolean;
     };
 
     // Deduplicate places within 50m
@@ -96,6 +97,26 @@ export async function POST(request: NextRequest) {
     // Fallback to nearest neighbor if API fails
     if (!result) {
       result = fallbackOptimization(origin, unique);
+    }
+
+    // Append origin as last stop if returnToOrigin is requested
+    if (returnToOrigin) {
+      const originReturn: ResolvedPlace = {
+        id: "__origin_return__",
+        originalLink: "",
+        name: "Ponto de partida",
+        address: "",
+        coordinates: origin,
+        status: "resolved",
+      };
+      const stopsWithReturn = [...result.orderedStops, originReturn];
+      const { urls } = buildGoogleMapsUrls(origin, stopsWithReturn);
+      result = {
+        ...result,
+        orderedStops: stopsWithReturn,
+        googleMapsUrl: urls[0] ?? "",
+        googleMapsUrls: urls,
+      };
     }
 
     return NextResponse.json(result);
