@@ -113,7 +113,7 @@ export default function OptimizedRoute({ route, origin, returnToOrigin, onRecalc
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-accent/20 flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e07a3a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00AE9D" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20 6L9 17l-5-5" />
               </svg>
             </div>
@@ -213,7 +213,7 @@ export default function OptimizedRoute({ route, origin, returnToOrigin, onRecalc
                 >
                   {copiedIndex === index ? (
                     <>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5a9a6e" strokeWidth="2.5">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7DB61C" strokeWidth="2.5">
                         <path d="M20 6L9 17l-5-5" />
                       </svg>
                       Link copiado!
@@ -246,7 +246,7 @@ export default function OptimizedRoute({ route, origin, returnToOrigin, onRecalc
         {/* Origin */}
         <div className="flex items-start gap-3 pl-1 step-line">
           <div className="w-8 h-8 rounded-full bg-info/20 flex items-center justify-center flex-shrink-0">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4a8ec4" strokeWidth="2.5">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#49479D" strokeWidth="2.5">
               <circle cx="12" cy="12" r="3" />
               <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
             </svg>
