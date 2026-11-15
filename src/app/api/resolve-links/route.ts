@@ -9,12 +9,16 @@
  * 2. Extract place_id from URL if available
  * 3. Extract coordinates from the expanded URL
  * 4. Extract place name/query from URL
- * 5. If place_id found → use Places Details API (most accurate)
+ * 5. If place_id found → use Place Details (New) (most accurate)
  * 6. If coordinates found → use Geocoding API to get address and name
- * 7. If only query → use Places API text search to resolve
+ * 7. If only query → use Text Search (New) to resolve
  *
  * Security: short URL expansion is restricted to known Google domains (SSRF protection).
  * Performance: links are resolved concurrently in batches of 5.
+ *
+ * NOTE: migrated from the Places API (Legacy) to the Places API (New).
+ * Enable "Places API (New)" in the Google Cloud Console. The Geocoding API
+ * calls are unchanged — that API is not legacy.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -23,6 +27,19 @@ import { checkRateLimit } from "@/lib/rate-limiter";
 import { ResolvedPlace, UnresolvedLink } from "@/types";
 
 const API_KEY = process.env.GOOGLE_MAPS_API_KEY || "";
+
+// Places API (New) endpoints (replace the legacy /maps/api/place/* endpoints)
+const PLACES_BASE = "https://places.googleapis.com/v1";
+
+// The Places API (New) requires an explicit response field mask on every
+// request; omitting it returns an error.
+const PLACE_DETAILS_FIELD_MASK = "id,displayName,formattedAddress,location";
+const PLACE_SEARCH_FIELD_MASK =
+  "places.id,places.displayName,places.formattedAddress,places.location";
+
+// Locale hints for the Places API (New)
+const LANGUAGE_CODE = "pt-BR";
+const REGION_CODE = "BR";
 
 // Rate limit: 60 resolve requests per minute per IP
 const RATE_LIMIT = 60;
@@ -142,7 +159,7 @@ async function resolveLink(link: string): Promise<ResolvedPlace | null> {
 
   // Step 3: Resolve using best available data — cascade through fallbacks
 
-  // 3a. Place ID (standard ChIJ… works; CID 0x… fails gracefully → continue)
+  // 3a. Place ID (standard ChIJ… works; legacy CID 0x… is skipped → continue)
   if (placeId) {
     const byId = await resolveByPlaceId(placeId, link);
     if (byId) return byId;
@@ -153,19 +170,19 @@ async function resolveLink(link: string): Promise<ResolvedPlace | null> {
     return resolveByCoordinates(coords.lat, coords.lng, link, query);
   }
 
-  // 3c. Places text search with short name (requires Places API)
+  // 3c. Text Search (New) with short name (requires Places API (New))
   if (query) {
     const byName = await resolveByTextSearch(query, link);
     if (byName) return byName;
   }
 
-  // 3d. Places text search with full address string (requires Places API)
+  // 3d. Text Search (New) with full address string (requires Places API (New))
   if (fullQuery && fullQuery !== query) {
     const byFull = await resolveByTextSearch(fullQuery, link);
     if (byFull) return byFull;
   }
 
-  // 3e. Geocoding API with the address from URL path — works even without Places API
+  // 3e. Geocoding API with the address from URL path — works without Places API (New)
   //     e.g. "José Carlos Packer - Produtor Rural, Corupá - SC, 89278-000"
   //     → geocodes the city/address portion and returns approximate location
   if (fullQuery) {
@@ -322,37 +339,83 @@ function extractFullQuery(url: string): string | null {
 // Google APIs resolution
 // ─────────────────────────────────────────────
 
+/**
+ * A single place as returned by the Places API (New),
+ * limited to the fields requested in the field mask.
+ */
+interface NewPlace {
+  id?: string;
+  displayName?: { text?: string; languageCode?: string };
+  formattedAddress?: string;
+  location?: { latitude?: number; longitude?: number };
+}
+
+interface NewPlaceError {
+  error?: { code?: number; message?: string; status?: string };
+}
+
+/**
+ * Convert a Places API (New) place into a ResolvedPlace.
+ * Returns null when the place carries no usable coordinates.
+ */
+function toResolvedPlace(
+  place: NewPlace | undefined,
+  originalLink: string,
+  fallbackName: string
+): ResolvedPlace | null {
+  const lat = place?.location?.latitude;
+  const lng = place?.location?.longitude;
+
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+
+  return {
+    id: crypto.randomUUID(),
+    originalLink,
+    name: place?.displayName?.text || fallbackName,
+    address: place?.formattedAddress || "",
+    coordinates: { lat, lng },
+    placeId: place?.id,
+    status: "resolved",
+  };
+}
+
+/**
+ * Legacy CID / ftid identifiers (0x<hex>:0x<hex>) are not accepted by the
+ * Places API (New), so we skip the request instead of spending a billed call
+ * on a response we know will fail.
+ */
+function isLegacyCid(placeId: string): boolean {
+  return /^0x[0-9a-f]+:0x[0-9a-f]+$/i.test(placeId);
+}
+
 async function resolveByPlaceId(
   placeId: string,
   originalLink: string
 ): Promise<ResolvedPlace | null> {
-  const url =
-    `https://maps.googleapis.com/maps/api/place/details/json` +
-    `?place_id=${encodeURIComponent(placeId)}` +
-    `&fields=name,formatted_address,geometry,place_id` +
-    `&key=${API_KEY}`;
-
-  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  const data = await res.json();
-
-  console.log(`[placeId] status=${data.status} placeId=${placeId}`);
-
-  if (data.status === "OK" && data.result) {
-    return {
-      id: crypto.randomUUID(),
-      originalLink,
-      name: data.result.name || "Local desconhecido",
-      address: data.result.formatted_address || "",
-      coordinates: {
-        lat: data.result.geometry.location.lat,
-        lng: data.result.geometry.location.lng,
-      },
-      placeId: data.result.place_id,
-      status: "resolved",
-    };
+  if (isLegacyCid(placeId)) {
+    console.log(`[placeId] formato CID não suportado, ignorando: ${placeId}`);
+    return null;
   }
 
-  return null;
+  const url = `${PLACES_BASE}/places/${encodeURIComponent(placeId)}`;
+
+  const res = await fetch(url, {
+    headers: {
+      "X-Goog-Api-Key": API_KEY,
+      "X-Goog-FieldMask": PLACE_DETAILS_FIELD_MASK,
+    },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+
+  const data = (await res.json()) as NewPlace & NewPlaceError;
+
+  console.log(
+    `[placeId] http=${res.status} status=${data.error?.status ?? "OK"} placeId=${placeId}`
+  );
+
+  if (!res.ok || data.error) return null;
+
+  return toResolvedPlace(data, originalLink, "Local desconhecido");
 }
 
 async function resolveByCoordinates(
@@ -407,38 +470,36 @@ async function resolveByTextSearch(
   query: string,
   originalLink: string
 ): Promise<ResolvedPlace | null> {
-  const url =
-    `https://maps.googleapis.com/maps/api/place/textsearch/json` +
-    `?query=${encodeURIComponent(query)}` +
-    `&key=${API_KEY}`;
+  const res = await fetch(`${PLACES_BASE}/places:searchText`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": API_KEY,
+      "X-Goog-FieldMask": PLACE_SEARCH_FIELD_MASK,
+    },
+    body: JSON.stringify({
+      textQuery: query,
+      languageCode: LANGUAGE_CODE,
+      regionCode: REGION_CODE,
+      maxResultCount: 1,
+    }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  const data = await res.json();
+  const data = (await res.json()) as { places?: NewPlace[] } & NewPlaceError;
 
-  console.log(`[textSearch] status=${data.status} query="${query}"`);
+  console.log(
+    `[textSearch] http=${res.status} status=${data.error?.status ?? "OK"} query="${query}"`
+  );
 
-  if (data.status === "OK" && data.results?.[0]) {
-    const result = data.results[0];
-    return {
-      id: crypto.randomUUID(),
-      originalLink,
-      name: result.name || query,
-      address: result.formatted_address || "",
-      coordinates: {
-        lat: result.geometry.location.lat,
-        lng: result.geometry.location.lng,
-      },
-      placeId: result.place_id,
-      status: "resolved",
-    };
-  }
+  if (!res.ok || data.error) return null;
 
-  return null;
+  return toResolvedPlace(data.places?.[0], originalLink, query);
 }
 
 /**
  * Forward geocoding fallback using the Geocoding API.
- * Used when the Places API is unavailable or returns no results.
+ * Used when the Places API (New) is unavailable or returns no results.
  * Geocodes the address string from the URL path to get coordinates.
  * Uses `displayName` as the place label (e.g. the person/business name).
  */

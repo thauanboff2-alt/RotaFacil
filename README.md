@@ -7,7 +7,7 @@ Sistema web para otimização de rotas a partir de links compartilhados do Googl
 - **Input flexível**: Cole links do Google Maps (curtos e longos), um por linha
 - **Resolução automática**: Expande links curtos `maps.app.goo.gl`, extrai coordenadas, place_id e nomes
 - **Localização do usuário**: Captura a posição atual como origem da rota
-- **Otimização por tempo**: Usa a Google Directions API com `optimizeWaypoints=true`
+- **Otimização por tempo**: Usa a Google Routes API com `optimizeWaypointOrder: true`
 - **Fallback inteligente**: Se a API falhar, usa heurística de vizinho mais próximo (Haversine)
 - **Deduplicação**: Remove locais duplicados ou muito próximos (< 50m)
 - **URL final do Google Maps**: Gera link pronto com origin, destination, waypoints e travelmode
@@ -21,7 +21,7 @@ Sistema web para otimização de rotas a partir de links compartilhados do Googl
 - **TypeScript**
 - **Tailwind CSS**
 - **Zod** (validação)
-- **Google Maps APIs** (Directions, Geocoding, Places)
+- **Google Maps APIs** (Routes API, Places API (New), Geocoding API)
 
 ## Arquitetura
 
@@ -30,7 +30,7 @@ src/
 ├── app/
 │   ├── api/
 │   │   ├── resolve-links/   → POST: expande e resolve links do Google Maps
-│   │   └── optimize-route/  → POST: otimiza ordem via Directions API
+│   │   └── optimize-route/  → POST: otimiza ordem via Routes API
 │   ├── layout.tsx           → Root layout
 │   ├── page.tsx             → Página principal (client component)
 │   └── globals.css          → Estilos globais + Tailwind
@@ -74,9 +74,14 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=sua_chave_aqui
 
 Ative as seguintes APIs no seu projeto:
 
-- **Directions API** — otimização de rotas
-- **Geocoding API** — geocodificação reversa
-- **Places API** — busca por texto e detalhes de lugares
+- **Routes API** — otimização da ordem das paradas
+- **Places API (New)** — busca por texto e detalhes de lugares
+- **Geocoding API** — geocodificação direta e reversa
+
+> As versões antigas dessas APIs (Directions API, Distance Matrix API e Places API)
+> estão em status **Legacy** desde março/2025 e não podem ser ativadas em projetos
+> novos do Google Cloud. Este projeto já usa as versões atuais, então mantenha as
+> legadas desativadas.
 
 ### 4. Execute
 
@@ -100,7 +105,7 @@ Acesse `http://localhost:3000`
 
 ### URL do Google Maps
 - Suporta até ~23 waypoints por URL (limite prático de ~2048 caracteres)
-- O parâmetro `optimize:true` funciona apenas na Directions API, não na URL
+- A otimização só existe na Routes API, não na URL do Google Maps
 - A otimização é feita server-side e a URL já reflete a ordem otimizada
 
 ### Links curtos
@@ -108,9 +113,11 @@ Acesse `http://localhost:3000`
 - Alguns links podem falhar se expirados ou com proteção anti-bot
 - O sistema tenta HEAD primeiro, depois GET como fallback
 
-### Directions API
-- Limite de 25 waypoints por request
-- A API otimiza waypoints por tempo, considerando tráfego em tempo real
+### Routes API
+- Limite de 25 waypoints intermediários por request
+- A API otimiza a ordem por tempo de deslocamento, considerando distância e número de conversões
+- Exige o field mask `routes.optimizedIntermediateWaypointIndex`; sem ele a requisição falha
+- `routingPreference` não pode ser `TRAFFIC_AWARE_OPTIMAL` quando a otimização está ativa
 - Se a API falhar, o sistema usa nearest-neighbor como fallback
 
 ### Rota aberta
