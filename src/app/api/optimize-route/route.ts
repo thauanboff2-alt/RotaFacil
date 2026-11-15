@@ -6,13 +6,16 @@
  * the ordered stops with the final Google Maps URL.
  *
  * Optimization strategy:
- * 1. Use Google Directions API with `optimizeWaypoints=true`
- *    (supports up to 25 waypoints per request)
+ * 1. Use the Google Routes API (`computeRoutes`) with
+ *    `optimizeWaypointOrder: true` (supports up to 25 intermediates)
  * 2. If API fails, fall back to nearest-neighbor heuristic
  *    using Haversine distance
  *
  * The route is open-ended: starts at origin, ends at the last
  * optimized stop. No return to origin.
+ *
+ * NOTE: migrated from the Directions API (Legacy) to the Routes API.
+ * Enable "Routes API" in the Google Cloud Console.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -33,11 +36,25 @@ import {
 
 const API_KEY = process.env.GOOGLE_MAPS_API_KEY || "";
 
+// Routes API endpoint (replaces the legacy Directions API)
+const ROUTES_ENDPOINT = "https://routes.googleapis.com/directions/v2:computeRoutes";
+
+// The Routes API requires an explicit response field mask.
+// `routes.optimizedIntermediateWaypointIndex` is mandatory when
+// `optimizeWaypointOrder` is true — without it the request fails.
+const ROUTES_FIELD_MASK = [
+  "routes.optimizedIntermediateWaypointIndex",
+  "routes.duration",
+  "routes.distanceMeters",
+  "routes.legs.duration",
+  "routes.legs.distanceMeters",
+].join(",");
+
 // Rate limit: 30 optimize requests per minute per IP
 const RATE_LIMIT = 30;
 const RATE_WINDOW_MS = 60 * 1000;
 
-// Timeout for Directions API call
+// Timeout for the Routes API call
 const FETCH_TIMEOUT_MS = 10000;
 
 export async function POST(request: NextRequest) {
@@ -91,8 +108,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Try Google Directions API optimization first
-    let result = await optimizeWithDirectionsApi(origin, unique);
+    // Try Routes API optimization first
+    let result = await optimizeWithRoutesApi(origin, unique);
 
     // Fallback to nearest neighbor if API fails
     if (!result) {
@@ -129,10 +146,54 @@ export async function POST(request: NextRequest) {
 }
 
 // ─────────────────────────────────────────────
-// Google Directions API optimization
+// Routes API types (only the fields we request)
 // ─────────────────────────────────────────────
 
-async function optimizeWithDirectionsApi(
+interface RoutesApiLeg {
+  /** ISO-8601-ish duration string, e.g. "1234s" */
+  duration?: string;
+  distanceMeters?: number;
+}
+
+interface RoutesApiRoute {
+  /** Indices into the `intermediates` array, in optimized visit order */
+  optimizedIntermediateWaypointIndex?: number[];
+  duration?: string;
+  distanceMeters?: number;
+  legs?: RoutesApiLeg[];
+}
+
+interface RoutesApiResponse {
+  routes?: RoutesApiRoute[];
+  error?: { code?: number; message?: string; status?: string };
+}
+
+/**
+ * Parse a Routes API duration ("1234s") into seconds.
+ * Returns 0 when absent or malformed.
+ */
+function parseDurationSeconds(duration?: string): number {
+  if (!duration) return 0;
+  const seconds = parseFloat(duration.replace(/s$/, ""));
+  return Number.isFinite(seconds) ? Math.round(seconds) : 0;
+}
+
+function toWaypoint(coords: Coordinates) {
+  return {
+    location: {
+      latLng: {
+        latitude: coords.lat,
+        longitude: coords.lng,
+      },
+    },
+  };
+}
+
+// ─────────────────────────────────────────────
+// Google Routes API optimization
+// ─────────────────────────────────────────────
+
+async function optimizeWithRoutesApi(
   origin: Coordinates,
   places: ResolvedPlace[]
 ): Promise<OptimizeRouteResponse | null> {
@@ -150,43 +211,71 @@ async function optimizeWithDirectionsApi(
       };
     }
 
-    const originStr = `${origin.lat},${origin.lng}`;
-
     // Use farthest place (by Haversine) as fixed destination;
     // let the API optimize the order of all other waypoints.
     const farthestIdx = findFarthestIndex(origin, places);
     const destination = places[farthestIdx];
-    const waypoints = places.filter((_, i) => i !== farthestIdx);
+    const intermediatePlaces = places.filter((_, i) => i !== farthestIdx);
 
-    let apiUrl =
-      `https://maps.googleapis.com/maps/api/directions/json` +
-      `?origin=${originStr}` +
-      `&destination=${destination.coordinates.lat},${destination.coordinates.lng}` +
-      `&travelmode=driving` +
-      `&key=${API_KEY}`;
+    const requestBody = {
+      origin: toWaypoint(origin),
+      destination: toWaypoint(destination.coordinates),
+      intermediates: intermediatePlaces.map((p) => toWaypoint(p.coordinates)),
+      travelMode: "DRIVE",
+      // Waypoint optimization is incompatible with TRAFFIC_AWARE_OPTIMAL,
+      // so routingPreference is intentionally left at its default.
+      optimizeWaypointOrder: true,
+      languageCode: "pt-BR",
+      units: "METRIC",
+    };
 
-    if (waypoints.length > 0) {
-      const wpStr = waypoints
-        .map((p) => `${p.coordinates.lat},${p.coordinates.lng}`)
-        .join("|");
-      apiUrl += `&waypoints=optimize:true|${wpStr}`;
-    }
+    const res = await fetch(ROUTES_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": API_KEY,
+        "X-Goog-FieldMask": ROUTES_FIELD_MASK,
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
 
-    const res = await fetch(apiUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    const data = await res.json();
+    const data = (await res.json()) as RoutesApiResponse;
 
-    if (data.status !== "OK" || !data.routes?.[0]) {
+    if (!res.ok || data.error) {
+      console.log(
+        `[routes] http=${res.status} status=${data.error?.status ?? "-"} message=${
+          data.error?.message ?? "-"
+        }`
+      );
       return null;
     }
 
-    const route = data.routes[0];
-    const waypointOrder: number[] = route.waypoint_order || [];
+    const route = data.routes?.[0];
+    if (!route) return null;
 
-    // Reconstruct ordered stops from API-optimized waypoint order
+    // Reconstruct ordered stops from the API-optimized waypoint order.
+    // When there is a single intermediate the API may omit the index array,
+    // in which case the original order already is the optimized one.
+    const optimizedOrder =
+      route.optimizedIntermediateWaypointIndex ??
+      intermediatePlaces.map((_, i) => i);
+
     const orderedStops: ResolvedPlace[] = [];
-    for (const idx of waypointOrder) {
-      orderedStops.push(waypoints[idx]);
+    for (const idx of optimizedOrder) {
+      const place = intermediatePlaces[idx];
+      if (place) orderedStops.push(place);
     }
+
+    // Safety net: if the API returned an incomplete order, bail out to the
+    // fallback rather than silently dropping stops from the route.
+    if (orderedStops.length !== intermediatePlaces.length) {
+      console.log(
+        `[routes] ordem incompleta: ${orderedStops.length}/${intermediatePlaces.length}`
+      );
+      return null;
+    }
+
     orderedStops.push(destination);
 
     // Extract per-leg duration and distance
@@ -195,25 +284,34 @@ async function optimizeWithDirectionsApi(
     let totalDistance = 0;
 
     const stopNames = ["Sua localização", ...orderedStops.map((s) => s.name)];
+    const apiLegs = route.legs ?? [];
 
-    for (let i = 0; i < route.legs.length; i++) {
-      const leg = route.legs[i];
+    for (let i = 0; i < apiLegs.length; i++) {
+      const leg = apiLegs[i];
+      const durationSeconds = parseDurationSeconds(leg.duration);
+      const distanceMeters = leg.distanceMeters ?? 0;
+
       legs.push({
-        from: stopNames[i],
-        to: stopNames[i + 1],
-        durationSeconds: leg.duration.value,
-        distanceMeters: leg.distance.value,
+        from: stopNames[i] ?? "",
+        to: stopNames[i + 1] ?? "",
+        durationSeconds,
+        distanceMeters,
       });
-      totalDuration += leg.duration.value;
-      totalDistance += leg.distance.value;
+      totalDuration += durationSeconds;
+      totalDistance += distanceMeters;
     }
+
+    // Prefer the route-level totals when available (they account for
+    // anything not covered by the sum of the legs).
+    const routeDuration = parseDurationSeconds(route.duration);
+    const routeDistance = route.distanceMeters ?? 0;
 
     const { urls } = buildGoogleMapsUrls(origin, orderedStops);
 
     return {
       orderedStops,
-      totalDurationSeconds: totalDuration,
-      totalDistanceMeters: totalDistance,
+      totalDurationSeconds: routeDuration || totalDuration,
+      totalDistanceMeters: routeDistance || totalDistance,
       legs,
       googleMapsUrl: urls[0] ?? "",
       googleMapsUrls: urls,
