@@ -7,6 +7,29 @@
 import { LinkEntry } from "@/types";
 
 // ─────────────────────────────────────────────
+// ID generation
+// ─────────────────────────────────────────────
+
+/**
+ * crypto.randomUUID() only exists in secure contexts AND in newer browsers
+ * (Safari 15.4+, Chrome 92+). This parser runs in the browser, so on an older
+ * mobile browser the call throws a TypeError — and because the parse happens
+ * inside a useMemo during render, that error takes the whole page down and no
+ * link is ever detected. Fall back to a plain random id instead.
+ */
+function randomId(): string {
+  const c = typeof globalThis !== "undefined" ? globalThis.crypto : undefined;
+  if (c && typeof c.randomUUID === "function") {
+    try {
+      return c.randomUUID();
+    } catch {
+      // fall through
+    }
+  }
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// ─────────────────────────────────────────────
 // URL detection
 // ─────────────────────────────────────────────
 
@@ -185,7 +208,7 @@ export function parseEntriesFromText(text: string): LinkEntry[] {
     const { clientName, empreendimento } = splitLabel(label);
 
     entries.push({
-      id: crypto.randomUUID(),
+      id: randomId(),
       link,
       clientName,
       empreendimento,
