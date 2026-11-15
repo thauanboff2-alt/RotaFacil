@@ -51,6 +51,29 @@ const CONCURRENCY = 5;
 // Timeout for each external API call (ms)
 const FETCH_TIMEOUT_MS = 8000;
 
+/**
+ * Browser-like User-Agent used when expanding short links.
+ *
+ * The previous value, "Mozilla/5.0 (compatible; RotaFacil/1.0)", has the shape
+ * crawlers use. Google answers those with a consent/interstitial page served at
+ * 200 instead of issuing the redirect, so fetch() returned the short URL itself
+ * as response.url — no place_id, no coordinates, nothing to extract — and the
+ * link was reported as unresolvable.
+ */
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+const BROWSER_HEADERS: Record<string, string> = {
+  "User-Agent": BROWSER_UA,
+  "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+};
+
+// Maximum redirect hops to follow manually when expanding a short link
+const MAX_REDIRECTS = 6;
+
 // Allowed hostnames when following short-link redirects (SSRF protection)
 const ALLOWED_REDIRECT_HOST =
   /^(maps\.app\.goo\.gl|goo\.gl|maps\.google\.[a-z]{2,6}(\.[a-z]{2})?|www\.google\.[a-z]{2,6}(\.[a-z]{2})?|google\.[a-z]{2,6}(\.[a-z]{2})?)$/i;
@@ -152,10 +175,24 @@ async function resolveLink(link: string): Promise<ResolvedPlace | null> {
   console.log(`[resolve] original="${link}" expanded="${expandedUrl}"`);
 
   // Step 2: Extract data from URL
-  const placeId = extractPlaceId(expandedUrl);
-  const coords = extractCoordinates(expandedUrl);
+  let placeId = extractPlaceId(expandedUrl);
+  let coords = extractCoordinates(expandedUrl);
   const query = extractQuery(expandedUrl);         // short name (business name only)
   const fullQuery = extractFullQuery(expandedUrl); // full decoded path (name + address)
+
+  // Step 2b: if the expanded URL carries nothing usable, read the page itself.
+  // This covers short links that land on an interstitial or consent page whose
+  // URL has no place data but whose HTML still does.
+  if (!placeId && !coords && !query && !fullQuery) {
+    const fromHtml = await extractFromHtml(expandedUrl);
+    placeId = placeId ?? fromHtml.placeId;
+    coords = coords ?? fromHtml.coords;
+    console.log(
+      `[resolve] fallback HTML placeId=${fromHtml.placeId ?? "-"} coords=${
+        fromHtml.coords ? `${fromHtml.coords.lat},${fromHtml.coords.lng}` : "-"
+      }`
+    );
+  }
 
   // Step 3: Resolve using best available data — cascade through fallbacks
 
@@ -189,9 +226,27 @@ async function resolveLink(link: string): Promise<ResolvedPlace | null> {
     return resolveByAddressGeocoding(fullQuery, query || fullQuery, link);
   }
 
-  return null;
+  // Nothing worked. Surface a message that says which stage came up empty,
+  // so a failure in the logs can be told apart from a bad link.
+  const expanded = expandedUrl !== link;
+  throw new Error(
+    expanded
+      ? "O link foi expandido, mas o Google não retornou coordenadas nem nome para ele."
+      : "O Google não expandiu este link curto (pode ter expirado ou estar bloqueando o servidor)."
+  );
 }
 
+/**
+ * Expand a Google short link into its full URL.
+ *
+ * Follows redirects manually, reading the Location header at each hop, instead
+ * of relying on fetch's redirect:"follow" and response.url. Manual following is
+ * what lets us tell "Google issued no redirect" apart from "Google redirected
+ * somewhere we do not allow" — with redirect:"follow" both look identical, and
+ * an interstitial served at 200 silently yields the original URL back.
+ *
+ * Every hop is validated against the allowed-host list (SSRF protection).
+ */
 async function expandShortUrl(url: string): Promise<string> {
   // Validate origin URL is from an allowed Google domain (prevent SSRF)
   let parsed: URL;
@@ -205,46 +260,102 @@ async function expandShortUrl(url: string): Promise<string> {
     throw new Error("URL não permitida.");
   }
 
-  const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  let current = url;
 
-  try {
-    const response = await fetch(url, {
-      method: "HEAD",
-      redirect: "follow",
-      signal,
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; RotaFacil/1.0)" },
-    });
+  for (let hop = 0; hop < MAX_REDIRECTS; hop++) {
+    let res: Response;
+    try {
+      res = await fetch(current, {
+        method: "GET",
+        redirect: "manual",
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        headers: BROWSER_HEADERS,
+      });
+    } catch {
+      throw new Error("Não foi possível acessar o link curto (tempo esgotado ou rede).");
+    }
 
-    // Only allow redirects to known Google domains (no private IPs)
-    const finalHost = new URL(response.url).hostname;
-    if (!ALLOWED_REDIRECT_HOST.test(finalHost) || isPrivateHost(finalHost)) {
+    // Not a redirect — this is the final document
+    if (res.status < 300 || res.status >= 400) {
+      return current;
+    }
+
+    const location = res.headers.get("location");
+    if (!location) return current;
+
+    // Resolve relative redirects against the current URL
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      return current;
+    }
+
+    if (!ALLOWED_REDIRECT_HOST.test(next.hostname) || isPrivateHost(next.hostname)) {
       throw new Error("Redirecionamento para domínio não permitido.");
     }
 
-    return response.url || url;
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("não permitido")) throw err;
-
-    // Fallback: GET request
-    try {
-      const signal2 = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-      const response = await fetch(url, {
-        redirect: "follow",
-        signal: signal2,
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; RotaFacil/1.0)" },
-      });
-
-      const finalHost = new URL(response.url).hostname;
-      if (!ALLOWED_REDIRECT_HOST.test(finalHost) || isPrivateHost(finalHost)) {
-        throw new Error("Redirecionamento para domínio não permitido.");
-      }
-
-      return response.url || url;
-    } catch (err2) {
-      if (err2 instanceof Error && err2.message.includes("não permitido")) throw err2;
-      throw new Error("Link curto inválido ou expirado.");
-    }
+    current = next.toString();
   }
+
+  return current;
+}
+
+/**
+ * Last-resort extraction: download the Google Maps page and look for the
+ * coordinates or place id inside the HTML.
+ *
+ * Needed when the short link resolves to a page whose URL carries no data —
+ * Google sometimes serves the place through an interstitial or a consent page,
+ * but the underlying document still contains the canonical URL and the
+ * coordinates.
+ */
+async function extractFromHtml(
+  url: string
+): Promise<{ placeId: string | null; coords: { lat: number; lng: number } | null }> {
+  const empty = { placeId: null, coords: null };
+
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return empty;
+  }
+  if (!ALLOWED_REDIRECT_HOST.test(host) || isPrivateHost(host)) return empty;
+
+  let html: string;
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      headers: BROWSER_HEADERS,
+    });
+    if (!res.ok) return empty;
+    html = await res.text();
+  } catch {
+    return empty;
+  }
+
+  // The canonical/og:url meta tag usually holds the full /place/ URL
+  const canonical =
+    html.match(/<link[^>]+rel="canonical"[^>]+href="([^"]+)"/i)?.[1] ||
+    html.match(/<meta[^>]+property="og:url"[^>]+content="([^"]+)"/i)?.[1] ||
+    null;
+
+  if (canonical) {
+    const decoded = canonical.replace(/&amp;/g, "&");
+    const fromCanonical = {
+      placeId: extractPlaceId(decoded),
+      coords: extractCoordinates(decoded),
+    };
+    if (fromCanonical.placeId || fromCanonical.coords) return fromCanonical;
+  }
+
+  // Fall back to scanning the document itself
+  return {
+    placeId: extractPlaceId(html),
+    coords: extractCoordinates(html),
+  };
 }
 
 function extractPlaceId(url: string): string | null {
