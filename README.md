@@ -67,8 +67,16 @@ Edite `.env.local` e adicione sua API key do Google Maps:
 
 ```
 GOOGLE_MAPS_API_KEY=sua_chave_aqui
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=sua_chave_aqui
 ```
+
+> Use apenas esta variável. Ela é lida somente no servidor, nas rotas `/api`.
+> Nunca crie uma versão com o prefixo `NEXT_PUBLIC_`: isso embutiria a chave
+> no JavaScript enviado ao navegador, deixando-a visível para qualquer pessoa.
+>
+> Por isso, ao restringir a chave no Google Cloud Console, use somente
+> "Restrição de API". Deixe a restrição de aplicativo em "Nenhuma" — chamadas
+> feitas pelo servidor não enviam Referer, e uma restrição por referenciador
+> HTTP faria o Google recusar tudo com 403.
 
 ### 3. APIs necessárias no Google Cloud Console
 
