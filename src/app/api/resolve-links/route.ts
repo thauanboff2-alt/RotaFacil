@@ -383,9 +383,26 @@ function extractCoordinates(url: string): { lat: number; lng: number } | null {
     return isValidCoords(lat, lng) ? { lat, lng } : null;
   };
 
+  /**
+   * Links shared from the Google Maps mobile app expand to
+   *   /maps/search/-26.787513,+-52.654671?entry=tts
+   * where the "+" is an encoded space. The comma is therefore NOT followed
+   * directly by the longitude, which is what every pattern below assumes.
+   * Normalising that separator away is what makes those links resolve.
+   */
+  const normalized = url
+    .replace(/%2C/gi, ",")
+    .replace(/%20/gi, " ")
+    .replace(/,\s*\+\s*/g, ",")
+    .replace(/,\s+/g, ",");
+
+  url = normalized;
+
   // @lat,lng,zoom — most common share/pin format
   return (
     try2(url.match(/@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/)) ||
+    // /maps/search/lat,lng — mobile app share format
+    try2(url.match(/\/maps\/search\/(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/)) ||
     // ll=lat,lng
     try2(url.match(/[?&]ll=(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/)) ||
     // q=lat,lng
@@ -419,6 +436,16 @@ function extractQuery(url: string): string | null {
       if (firstPart.length >= 4) return firstPart;
     }
     return decoded;
+  }
+
+  // /maps/search/<text> — mobile app share format for a named search
+  const searchMatch = url.match(/\/maps\/search\/([^/@?]+)/);
+  if (searchMatch) {
+    const decoded = decodeURIComponent(searchMatch[1]).replace(/\+/g, " ").trim();
+    // Skip when it is a coordinate pair — extractCoordinates handles those
+    if (decoded && !/^-?\d{1,3}\.\d+\s*,\s*-?\d{1,3}\.\d+$/.test(decoded)) {
+      return decoded;
+    }
   }
 
   const qMatch = url.match(/[?&]q=([^&]+)/);
