@@ -165,7 +165,18 @@ interface RoutesApiRoute {
 
 interface RoutesApiResponse {
   routes?: RoutesApiRoute[];
-  error?: { code?: number; message?: string; status?: string };
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+    /**
+     * Google puts the machine-readable cause here, e.g.
+     * { reason: "SERVICE_DISABLED" }        → API não ativada no projeto
+     * { reason: "API_KEY_SERVICE_BLOCKED" } → chave restrita, sem esta API
+     * { reason: "API_KEY_HTTP_REFERRER_BLOCKED" } → restrição de referenciador
+     */
+    details?: unknown[];
+  };
 }
 
 /**
@@ -246,7 +257,7 @@ async function optimizeWithRoutesApi(
       console.log(
         `[routes] http=${res.status} status=${data.error?.status ?? "-"} message=${
           data.error?.message ?? "-"
-        }`
+        } details=${JSON.stringify(data.error?.details ?? [])}`
       );
       return null;
     }

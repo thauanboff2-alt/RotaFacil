@@ -351,7 +351,13 @@ interface NewPlace {
 }
 
 interface NewPlaceError {
-  error?: { code?: number; message?: string; status?: string };
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+    /** Causa legível por máquina — ver comentário em optimize-route/route.ts */
+    details?: unknown[];
+  };
 }
 
 /**
@@ -410,7 +416,8 @@ async function resolveByPlaceId(
   const data = (await res.json()) as NewPlace & NewPlaceError;
 
   console.log(
-    `[placeId] http=${res.status} status=${data.error?.status ?? "OK"} placeId=${placeId}`
+    `[placeId] http=${res.status} status=${data.error?.status ?? "OK"} placeId=${placeId}` +
+      (data.error ? ` message=${data.error.message ?? "-"} details=${JSON.stringify(data.error.details ?? [])}` : "")
   );
 
   if (!res.ok || data.error) return null;
@@ -489,7 +496,8 @@ async function resolveByTextSearch(
   const data = (await res.json()) as { places?: NewPlace[] } & NewPlaceError;
 
   console.log(
-    `[textSearch] http=${res.status} status=${data.error?.status ?? "OK"} query="${query}"`
+    `[textSearch] http=${res.status} status=${data.error?.status ?? "OK"} query="${query}"` +
+      (data.error ? ` message=${data.error.message ?? "-"} details=${JSON.stringify(data.error.details ?? [])}` : "")
   );
 
   if (!res.ok || data.error) return null;
